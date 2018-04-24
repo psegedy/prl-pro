@@ -15,15 +15,6 @@
 
 using namespace std;
 
-typedef struct node_t {
-    int node;
-    int f_edge;
-    int r_edge;
-    int next_f_edge;
-    int next_r_edge;
-} node_t;
-
-
 int main(int argc, char **argv) {
     int numprocs;               // number of processors
     int rank;                   // rank
@@ -46,36 +37,16 @@ int main(int argc, char **argv) {
         adj_list.push_back(2*(i));
         adj_list.push_back(2*(i)+1);
     }
-    int weight[adj_list.size()] = {};
-    int suff_weight[adj_list.size()] = {};
-    int succ[adj_list.size()] = {};
-    int succ2[adj_list.size()] = {};
-    int list_rank[adj_list.size()] = {};
-    int my_v[adj_list.size()] = {};
-    int position[adj_list.size()] = {};
 
-    // for (int i = 0; i < adj_list.size()-1; i += 2) {
-    //     cout << adj_list[i] << "," << adj_list[i+1] << " ";
-    // }
-    // cout << endl;
-
+    // Scatter adj_list to all processors
     int adj_arr[adj_list.size()];
-    int etour[adj_list.size()];
     copy(adj_list.begin(), adj_list.end(), adj_arr);
-    // copy(adj_list.begin(), adj_list.end(), adj_arr);
-
     MPI_Scatter(adj_arr, 1, MPI_INT, &my_val, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    // MPI_Scatter(weight, 1, MPI_INT, &my_weight, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     if (rank%2 == 0)
         my_weight = 1;
 
-    if (rank == 0)
-    {
-        cout << adj_list.size() << endl;
-    }
-
-    // euler tour
+    // EULER TOUR
     if (my_val%2 == 0) { // forward edge
         if (my_val == 0) {
             if (4 >= adj_list.size())
@@ -110,41 +81,36 @@ int main(int argc, char **argv) {
         my_etour = 1;
     }
 
-    MPI_Gather(&my_etour, 1, MPI_INT, etour, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Gather(&my_weight, 1, MPI_INT, weight, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
-
+    // SUFFIX SUM
     if (rank == my_etour) {
         my_list_rank = 0;
     }
     else
         my_list_rank = 1;
-        // my_list_rank = my_weight;
 
-
+    // set -1 to last edge (to root)
     if (rank == my_etour)
         my_etour = -1;
 
+    // get predecessor
     if (my_etour != -1)
         MPI_Send(&rank, 1, MPI_INT, my_etour, 1, MPI_COMM_WORLD);
 
     if (rank != 0)
         MPI_Recv(&my_pred, 1, MPI_INT, MPI_ANY_SOURCE, 1, MPI_COMM_WORLD, &stat);
 
-    // cout << "rank: " << rank << " pred: " << my_pred << endl;
-
-
+    // compute suffix sum / list rank
     for (int k = 0; k < log2(numprocs); k++) {
+
+        if (my_etour != -1)
+            MPI_Send(&my_pred, 1, MPI_INT, my_etour, 0, MPI_COMM_WORLD);
 
         if (my_pred != -1) {
             MPI_Send(&my_etour, 1, MPI_INT, my_pred, 0, MPI_COMM_WORLD);
             MPI_Send(&my_list_rank, 1, MPI_INT, my_pred, 0, MPI_COMM_WORLD);
-            // cout << "k: " << k  << " Send: " << my_etour << " to: " << my_pred <<  " rank: " << rank << endl;
         }
 
         if (my_etour != -1) {
-            // cout << "Recv from: " << my_etour << " rank: " << rank <<  endl;
-            MPI_Send(&my_pred, 1, MPI_INT, my_etour, 0, MPI_COMM_WORLD);
             MPI_Recv(&my_succ, 1, MPI_INT, my_etour, 0, MPI_COMM_WORLD, &stat);
             MPI_Recv(&succ_list_rank, 1, MPI_INT, my_etour, 0, MPI_COMM_WORLD, &stat);
             my_etour = my_succ;
@@ -157,18 +123,16 @@ int main(int argc, char **argv) {
 
     }
 
-    // preorder 
-    // int pos = -1;
-    // if (my_weight == 1) {
-    //     pos = (numprocs-1) - my_list_rank;
-    // }
-    int preorder_arr[numprocs] = {};
-    // MPI_Gather(&pos, 1, MPI_INT, preorder_arr, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    // MPI_Barrier(MPI_COMM_WORLD);
+    int preorder_arr[numprocs] = {};
+    // order is reversed after suffix sum
     int pos = (numprocs-1) - my_list_rank;
+
+    // get preorder
+    // CPU 0 -> first edge in preorder
+    // CPU 1 -> second edge in preorder 
+    // ... etc
     int preorder = -1;
-    cout << "pos: " << pos << endl;
     MPI_Send(&rank, 1, MPI_INT, pos, 2, MPI_COMM_WORLD);
     MPI_Recv(&preorder, 1, MPI_INT, MPI_ANY_SOURCE, 2, MPI_COMM_WORLD, &stat);
 
@@ -180,73 +144,14 @@ int main(int argc, char **argv) {
     int result[numprocs];
     MPI_Gather(&res_node, 1, MPI_INT, result, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-
-    MPI_Gather(&my_list_rank, 1, MPI_INT, list_rank, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Gather(&preorder, 1, MPI_INT, preorder_arr, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
     if (rank == 0) {
-        for (int i = 0; i < adj_list.size()-1; i += 2) {
-            cout << adj_list[i] << " " << adj_list[i+1] << " ";
-        }
-        cout << endl;
-
-        for (int i = 0; i < adj_list.size(); ++i) {
-            cout << etour[i] << " ";
-        }
-        cout << endl;
-
-        for (int i = 0; i < adj_list.size(); ++i) {
-            cout << list_rank[i] << " ";
-        }
-        cout << endl;
-
-        for (int i = 0; i < adj_list.size(); ++i) {
-            cout << weight[i] << " ";
-        }
-        cout << endl;
-
-        for (int i = 0; i < adj_list.size(); ++i) {
-                cout << preorder_arr[i] << " ";
-        }
-        cout << endl;
-
-        cout << "preorder" << endl;
-        vector<int> preord;
-        cout << "0 ";
-        preord.push_back(0);
-        for (int i = 0; i < adj_list.size(); ++i) {
-            if (weight[i]) {
-                cout << preorder_arr[i] << " ";
-                preord.push_back(preorder_arr[i]);
-            }
-        }
-        cout << endl;
-
-        for (int i = 0; i < numprocs; ++i)
-        {
-            cout << result[i] << " ";
-        }
-        cout << endl;
-
-        cout << 0 << " ";
-        for (int i = 0; i < numprocs; i++) {
-            if (result[i] != -1)
-            cout << result[i] << " ";
-        }
-        cout << endl;
-
+        // print preorder
         cout << argv[1][0];
         for (int i = 0; i < numprocs; i++) {
             if (result[i] != -1)
             cout << argv[1][result[i]];
         }
         cout << endl;
-
-        // for(auto&& i : preord) {
-        //     cout << argv[1][i];
-        // }
-        // cout << endl;
-
     }
 
     MPI_Finalize(); 
